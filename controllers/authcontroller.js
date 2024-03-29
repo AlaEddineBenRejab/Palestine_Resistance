@@ -2,6 +2,7 @@ const User = require("../models/user");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
+const { verificationEmail } = require("../utils/verificationEmail.js");
 
 const register = async function (req, res) {
   const { FirstName, LastName, Email, Password } = req.body;
@@ -30,11 +31,19 @@ const register = async function (req, res) {
 
   User.create(NewUser)
     .then((docs) => {
-      res.status(201).json(docs);
-      //verificationEmail(docs.Email, "Email verification", otp);
+      verificationEmail(docs.Email, "Email verification", otp)
+        .then(() => {
+          res.status(201).json(docs);
+        })
+        .catch((emailErr) => {
+          // Handle email sending error
+          console.log(emailErr);
+          res.status(500).json({ error: "Error sending verification email" });
+        });
     })
     .catch((err) => {
-      res.status(500).json({ error: err });
+      console.error(err); // Log the error for debugging
+      res.status(500).json({ error: "Internal server error" });
     });
 };
 
@@ -76,4 +85,45 @@ const login = async function (req, res) {
   }
 };
 
-module.exports = { register, login };
+const emailVerification = async function (req, res) {
+  const { Email, OTP } = req.body;
+
+  const user = await User.findOne({ Email: Email });
+
+  if (!user) {
+    return res.status(400).send("User not found");
+  }
+
+  if (user.OTP !== OTP) {
+    return res.status(400).send("Invalid OTP");
+  }
+
+  // Mark user email as verified
+  user.Verified = true;
+  user.OTP = undefined;
+  await user.save();
+
+  res.status(200).send("Your email has been verified");
+};
+
+const logout = async function (req, res) {
+  const user = await User.findById(req.id);
+  if (user.Token == null) {
+    res.status(500).json({ error: "User already logged out" });
+  } else {
+    await User.findOneAndUpdate(
+      { _id: req.id },
+      {
+        Token: null,
+      }
+    )
+      .then((docs) => {
+        res.status(200).json({ message: "Logout successful" });
+      })
+      .catch((err) => {
+        res.status(500).json({ error: err });
+      });
+  }
+};
+
+module.exports = { register, login, emailVerification, logout };
